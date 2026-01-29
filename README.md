@@ -12,131 +12,152 @@
   [![GitHub Issues](https://img.shields.io/github/issues/TideDra/zotero-arxiv-daily)](https://github.com/TideDra/zotero-arxiv-daily/issues)
   [![GitHub Pull Requests](https://img.shields.io/github/issues-pr/TideDra/zotero-arxiv-daily)](https://github.com/TideDra/zotero-arxiv-daily/pulls)
   [![License](https://img.shields.io/github/license/TideDra/zotero-arxiv-daily)](/LICENSE)
-  [<img src="https://api.gitsponsors.com/api/badge/img?id=893025857" height="20">](https://api.gitsponsors.com/api/badge/link?p=PKMtRut1dWWuC1oFdJweyDSvJg454/GkdIx4IinvBblaX2AY4rQ7FYKAK1ZjApoiNhYEeduIEhfeZVIwoIVlvcwdJXVFD2nV2EE5j6lYXaT/RHrcsQbFl3aKe1F3hliP26OMayXOoZVDidl05wj+yg==)
 
 </div>
 
 ---
 
-<p align="center"> Recommend new arxiv papers of your interest daily according to your Zotero library.
+<p align="center"> 根据你的 Zotero 文献库，每日推荐感兴趣的 arXiv 论文。
     <br> 
 </p>
 
 > [!IMPORTANT]
-> Please keep an eye on this repo, and merge your forked repo in time when there is any update of this upstream, in order to enjoy new features and fix found bugs.
+> 请关注此仓库，及时同步上游更新以获取新功能和修复。
 
-## 🧐 About <a name = "about"></a>
+## 🧐 关于
 
-> Track new scientific researches of your interest by just forking (and staring) this repo!😊
+> 只需 Fork（和 Star）本仓库，即可追踪你感兴趣的最新科研成果！😊
 
-*Zotero-arXiv-Daily* finds arxiv papers that may attract you based on the context of your Zotero library, and then sends the result to your mailbox📮. It can be deployed as Github Action Workflow with **zero cost**, **no installation**, and **few configuration** of Github Action environment variables for daily **automatic** delivery.
+*Zotero-arXiv-Daily* 根据你 Zotero 文献库的内容，找到可能吸引你的 arXiv 论文，并将结果推送到**飞书群**📮或邮箱。可作为 GitHub Action 工作流部署，**零成本**、**无需安装**、**配置简单**，每日**自动**推送。
 
-## ✨ Features
-- Totally free! All the calculation can be done in the Github Action runner locally within its quota (for public repo).
-- AI-generated TL;DR for you to quickly pick up target papers.
-- Affiliations of the paper are resolved and presented.
-- Links of PDF and code implementation (if any) presented in the e-mail.
-- List of papers sorted by relevance with your recent research interest.
-- Fast deployment via fork this repo and set environment variables in the Github Action Page.
-- Support LLM API for generating TL;DR of papers.
-- Ignore unwanted Zotero papers using gitignore-style pattern.
+## ✨ 特性
 
-## 📷 Screenshot
+- 完全免费！所有计算都在 GitHub Action 运行器本地完成
+- AI 生成 TLDR 摘要，快速筛选目标论文
+- 解析并展示论文作者机构
+- 邮件/飞书卡片中包含 PDF 和代码链接
+- 论文按与你近期研究兴趣的相关度排序
+- 支持**飞书机器人**和**邮件**两种推送方式
+- 支持 LLM API 生成论文摘要
+- 使用 gitignore 风格规则忽略不需要的 Zotero 论文
+
+## 📷 截图
 ![screenshot](./assets/screenshot.png)
 
-## 🚀 Usage
-### Quick Start
-1. Fork (and star😘) this repo.
+## 🚀 使用方法
+
+### 快速开始
+
+1. Fork（并 Star😘）本仓库
 ![fork](./assets/fork.png)
 
-2. Set Github Action environment variables.
+2. 设置 GitHub Action 环境变量
 ![secrets](./assets/secrets.png)
 
-Below are all the secrets you need to set. They are invisible to anyone including you once they are set, for security.
+### 必需的 Secrets
 
-| Key | Required | Type |Description | Example |
+| Key | 必填 | 类型 | 说明 | 示例 |
 | :--- | :---: | :---  | :---  | :--- |
-| ZOTERO_ID | ✅ | str  | User ID of your Zotero account. **User ID is not your username, but a sequence of numbers**Get your ID from [here](https://www.zotero.org/settings/security). You can find it at the position shown in this [screenshot](https://github.com/TideDra/zotero-arxiv-daily/blob/main/assets/userid.png). | 12345678  |
-| ZOTERO_KEY | ✅ | str  | An Zotero API key with read access. Get a key from [here](https://www.zotero.org/settings/security).  | AB5tZ877P2j7Sm2Mragq041H   |
-| ARXIV_QUERY | ✅ | str  | The categories of target arxiv papers. Use `+` to concatenate multiple categories. The example retrieves papers about AI, CV, NLP, ML. Find the abbr of your research area from [here](https://arxiv.org/category_taxonomy).  | cs.AI+cs.CV+cs.LG+cs.CL |
-| SMTP_SERVER | ✅ | str | The SMTP server that sends the email. I recommend to utilize a seldom-used email for this. Ask your email provider (Gmail, QQ, Outlook, ...) for its SMTP server| smtp.qq.com |
-| SMTP_PORT | ✅ | int | The port of SMTP server. | 465 |
-| SENDER | ✅ | str | The email account of the SMTP server that sends you email. | abc@qq.com |
-| SENDER_PASSWORD | ✅ | str | The password of the sender account. Note that it's not necessarily the password for logging in the e-mail client, but the authentication code for SMTP service. Ask your email provider for this.   | abcdefghijklmn |
-| RECEIVER | ✅ | str | The e-mail address that receives the paper list. | abc@outlook.com |
-| MAX_PAPER_NUM | | int | The maximum number of the papers presented in the email. This value directly affects the execution time of this workflow, because it takes about 70s to generate TL;DR for one paper. `-1` means to present all the papers retrieved. | 50 |
-| SEND_EMPTY | | bool | Whether to send an empty email even if no new papers today. | False |
-| USE_LLM_API | | bool | Whether to use the LLM API in the cloud or to use local LLM. If set to `1`, the API is used. Else if set to `0`, the workflow will download and deploy an open-source LLM. Default to `0`. | 0 |
-| OPENAI_API_KEY | | str | API Key when using the API to access LLMs. You can get FREE API for using advanced open source LLMs in [SiliconFlow](https://cloud.siliconflow.cn/i/b3XhBRAm). | sk-xxx |
-| OPENAI_API_BASE | | str | API URL when using the API to access LLMs. If not filled in, the default is the OpenAI URL. | https://api.siliconflow.cn/v1 |
-| MODEL_NAME | | str | Model name when using the API to access LLMs. If not filled in, the default is gpt-4o. Qwen/Qwen2.5-7B-Instruct is recommended when using [SiliconFlow](https://cloud.siliconflow.cn/i/b3XhBRAm). | Qwen/Qwen2.5-7B-Instruct |
+| ZOTERO_ID | ✅ | str | Zotero 用户 ID（**是一串数字，不是用户名**）。从[这里](https://www.zotero.org/settings/security)获取 | 12345678 |
+| ZOTERO_KEY | ✅ | str | 具有读取权限的 Zotero API 密钥。从[这里](https://www.zotero.org/settings/security)获取 | AB5tZ877P2j7Sm2Mragq041H |
+| ARXIV_QUERY | ✅ | str | 目标 arXiv 论文类别，用 `+` 连接多个类别。从[这里](https://arxiv.org/category_taxonomy)查找 | cs.AI+cs.CV+cs.LG+cs.CL |
+| FEISHU_WEBHOOK_URL | ✅* | str | 飞书自定义机器人 webhook 地址 | https://open.feishu.cn/open-apis/bot/v2/hook/xxx |
+| FEISHU_SECRET | | str | 飞书机器人签名密钥（如启用安全设置）| abc123secret |
 
-There are also some public variables (Repository Variables) you can set, which are easy to edit.
-![vars](./assets/repo_var.png)
+> *如果使用邮件推送而非飞书，则需要配置邮件相关 Secrets（见下文）
 
-| Key | Required | Type | Description | Example |
-| :--- | :---  | :---  | :--- | :--- |
-| ZOTERO_IGNORE | | str | Gitignore-style patterns marking the Zotero collections that should be ignored. One rule one line. Learn more about [gitignore](https://git-scm.com/docs/gitignore). | AI Agent/<br>**/survey<br>!LLM/survey |
-| REPOSITORY | | str | The repository that provides the workflow. If set, the value can only be `TideDra/zotero-arxiv-daily`, in which case, the workflow always pulls the latest code from this upstream repo, so that you don't need to sync your forked repo upon each update, unless the workflow file is changed. | `TideDra/zotero-arxiv-daily` |
-| REF | | str | The specified ref of the workflow to run. Only valid when REPOSITORY is set to `TideDra/zotero-arxiv-daily`. Currently supported values include `main` for stable version, `dev` for development version which has new features and potential bugs. | `main` |
-| LANGUAGE | | str | The language of TLDR; Its value is directly embeded in the prompt passed to LLM | Chinese |
+### 邮件推送配置（可选）
 
-That's all! Now you can test the workflow by manually triggering it:
+如需使用邮件推送，设置 `NOTIFY_METHOD` 为 `email` 或 `both`，并配置以下 Secrets：
+
+| Key | 类型 | 说明 | 示例 |
+| :--- | :---  | :---  | :--- |
+| SMTP_SERVER | str | SMTP 服务器 | smtp.qq.com |
+| SMTP_PORT | int | SMTP 端口 | 465 |
+| SENDER | str | 发件邮箱 | abc@qq.com |
+| SENDER_PASSWORD | str | 发件邮箱 SMTP 密码 | abcdefghijklmn |
+| RECEIVER | str | 收件邮箱 | abc@outlook.com |
+
+### LLM 配置（可选）
+
+| Key | 类型 | 说明 | 示例 |
+| :--- | :---  | :---  | :--- |
+| MAX_PAPER_NUM | int | 推送论文最大数量，`-1` 为全部 | 50 |
+| USE_LLM_API | bool | 是否使用云端 LLM API（`1`）或本地 LLM（`0`，默认）| 0 |
+| OPENAI_API_KEY | str | LLM API 密钥。可在 [SiliconFlow](https://cloud.siliconflow.cn/i/b3XhBRAm) 获取免费 API | sk-xxx |
+| OPENAI_API_BASE | str | LLM API 地址，默认 OpenAI | https://api.siliconflow.cn/v1 |
+| MODEL_NAME | str | 模型名称，默认 gpt-4o | Qwen/Qwen2.5-7B-Instruct |
+
+### Repository Variables
+
+| Key | 类型 | 说明 | 示例 |
+| :--- | :---  | :---  | :--- |
+| ZOTERO_IGNORE | str | gitignore 风格规则，忽略特定 Zotero 文献夹 | AI Agent/<br>**/survey |
+| NOTIFY_METHOD | str | 推送方式：`feishu`（默认）/ `email` / `both` | feishu |
+| LANGUAGE | str | TLDR 摘要语言 | Chinese |
+| SEND_EMPTY | bool | 无新论文时是否发送空消息 | False |
+
+---
+
+### 配置飞书机器人
+
+1. 在目标群组中点击设置 → 群机器人 → 添加机器人 → 自定义机器人
+2. 设置机器人名称，获取 webhook 地址
+3. （可选）启用签名校验并记录密钥
+4. 将 webhook 地址添加到 GitHub Secrets 的 `FEISHU_WEBHOOK_URL`
+
+> ⚠️ **请妥善保管 webhook 地址**，避免泄露后被恶意调用
+
+---
+
+### 测试工作流
+
+配置完成后，手动触发测试：
 ![test](./assets/test.png)
 
 > [!NOTE]
-> The Test-Workflow Action is the debug version of the main workflow (Send-emails-daily), which always retrieve 5 arxiv papers regardless of the date. While the main workflow will be automatically triggered everyday and retrieve new papers released yesterday. There is no new arxiv paper at weekends and holiday, in which case you may see "No new papers found" in the log of main workflow.
+> Test-Workflow 是调试版本，始终获取 5 篇论文。主工作流每天自动运行，获取前一天发布的新论文。周末和节假日没有新论文。
 
-Then check the log and the receiver email after it finishes.
+默认每天 UTC 22:00 运行，可在 `.github/workflows/main.yml` 中修改。
 
-By default, the main workflow runs on 22:00 UTC everyday. You can change this time by editting the workflow config `.github/workflows/main.yml`.
+### 本地运行
 
-### Local Running
-Supported by [uv](https://github.com/astral-sh/uv), this workflow can easily run on your local device if uv is installed:
+需安装 [uv](https://github.com/astral-sh/uv)：
+
 ```bash
-# set all the environment variables
+# 设置环境变量
 # export ZOTERO_ID=xxxx
+# export FEISHU_WEBHOOK_URL=xxxx
 # ...
 cd zotero-arxiv-daily
 uv run main.py
 ```
-> [!IMPORTANT]
-> The workflow will download and run an LLM (Qwen2.5-3B, the file size of which is about 3G). Make sure your network and hardware can handle it.
 
-> [!WARNING]
-> Other package managers like pip or conda are not tested. You can still use them to install this workflow because there is a `pyproject.toml`, while potential problems exist.
+## 📖 工作原理
 
-## 🚀 Sync with the latest version
-This project is in active development. You can subscribe this repo via `Watch` so that you can be notified once we publish new release.
+*Zotero-arXiv-Daily* 首先通过 API 获取你 Zotero 文献库中的所有论文和前一天发布的 arXiv 论文。然后使用 embedding 模型计算每篇论文摘要的向量表示。新论文的得分是它与所有 Zotero 论文的加权平均相似度（最近添加的论文权重更高）。
 
-![Watch](./assets/subscribe_release.png)
+TLDR 由轻量级 LLM（Qwen2.5-3b-instruct-q4_k_m）根据论文的标题、摘要、引言和结论生成。
 
+## 📌 限制
 
-## 📖 How it works
-*Zotero-arXiv-Daily* firstly retrieves all the papers in your Zotero library and all the papers released in the previous day, via corresponding API. Then it calculates the embedding of each paper's abstract via an embedding model. The score of a paper is its weighted average similarity over all your Zotero papers (newer paper added to the library has higher weight).
+- 推荐算法较简单，可能无法准确反映你的兴趣。欢迎提出改进建议！
+- 工作流在 GitHub Action 运行器的 CPU 上部署 LLM，生成一篇论文的 TLDR 约需 70 秒。
 
-The TLDR of each paper is generated by a lightweight LLM (Qwen2.5-3b-instruct-q4_k_m), given its title, abstract, introduction, and conclusion (if any). The introduction and conclusion are extracted from the source latex file of the paper.
+## 👯‍♂️ 贡献
 
-## 📌 Limitations
-- The recommendation algorithm is very simple, it may not accurately reflect your interest. Welcome better ideas for improving the algorithm!
-- This workflow deploys an LLM on the cpu of Github Action runner, and it takes about 70s to generate a TLDR for one paper. High `MAX_PAPER_NUM` can lead the execution time exceed the limitation of Github Action runner (6h per execution for public repo, and 2000 mins per month for private repo). Commonly, the quota given to public repo is definitely enough for individual use. If you have special requirements, you can deploy the workflow in your own server, or use a self-hosted Github Action runner, or pay for the exceeded execution time.
+欢迎 Issue 和 PR！但请记住 **PR 应合并到 `dev` 分支**。
 
-## 👯‍♂️ Contribution
-Any issue and PR are welcomed! But remember that **each PR should merge to the `dev` branch**.
+## 📃 许可证
 
-## 📃 License
-Distributed under the AGPLv3 License. See `LICENSE` for detail.
+基于 AGPLv3 许可证分发。详见 `LICENSE`。
 
-## ❤️ Acknowledgement
+## ❤️ 致谢
+
 - [pyzotero](https://github.com/urschrei/pyzotero)
 - [arxiv](https://github.com/lukasschwab/arxiv.py)
 - [sentence_transformers](https://github.com/UKPLab/sentence-transformers)
 - [llama-cpp-python](https://github.com/abetlen/llama-cpp-python)
-
-## ☕ Buy Me A Coffee
-If you find this project helpful, welcome to sponsor me via WeChat or via [ko-fi](https://ko-fi.com/tidedra).
-![wechat_qr](assets/wechat_sponsor.JPG)
-
 
 ## 🌟 Star History
 
