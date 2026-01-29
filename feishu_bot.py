@@ -80,7 +80,10 @@ def build_paper_detail(paper: ArxivPaper, index: int) -> str:
     if affiliations:
         detail += f"🏛️ {affiliations}\n"
     detail += f"🔗 {links}\n\n"
-    detail += f"**摘要**\n{paper.tldr}\n"
+    
+    # 英文原文 + 中文翻译
+    detail += f"**Abstract (原文)**\n{paper.summary}\n\n"
+    detail += f"**摘要 (中文翻译)**\n{paper.tldr}\n"
     
     return detail
 
