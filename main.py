@@ -22,6 +22,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 from pyzotero import zotero
 from recommender import rerank_paper
 from construct_email import render_email, send_email
+from feishu_bot import send_feishu_message
 from tqdm import trange,tqdm
 from loguru import logger
 from gitignore_parser import parse_gitignore
@@ -155,6 +156,24 @@ if __name__ == '__main__':
         help="Language of TLDR",
         default="English",
     )
+    add_argument(
+        "--feishu_webhook_url",
+        type=str,
+        help="Feishu custom bot webhook URL",
+        default=None,
+    )
+    add_argument(
+        "--feishu_secret",
+        type=str,
+        help="Feishu custom bot signing secret",
+        default=None,
+    )
+    add_argument(
+        "--notify_method",
+        type=str,
+        help="Notification method: feishu, email, or both",
+        default="feishu",
+    )
     parser.add_argument('--debug', action='store_true', help='Debug mode')
     args = parser.parse_args()
     assert (
@@ -193,8 +212,24 @@ if __name__ == '__main__':
             logger.info("Using Local LLM as global LLM.")
             set_global_llm(lang=args.language)
 
-    html = render_email(papers)
-    logger.info("Sending email...")
-    send_email(args.sender, args.receiver, args.sender_password, args.smtp_server, args.smtp_port, html)
-    logger.success("Email sent successfully! If you don't receive the email, please check the configuration and the junk box.")
+    # 根据配置选择通知方式
+    notify_method = args.notify_method.lower() if args.notify_method else 'feishu'
+    
+    if notify_method in ['feishu', 'both']:
+        if args.feishu_webhook_url:
+            logger.info("Sending Feishu message...")
+            send_feishu_message(args.feishu_webhook_url, papers, args.feishu_secret)
+        else:
+            logger.warning("Feishu webhook URL not provided, skipping Feishu notification.")
+    
+    if notify_method in ['email', 'both']:
+        if args.sender and args.receiver:
+            html = render_email(papers)
+            logger.info("Sending email...")
+            send_email(args.sender, args.receiver, args.sender_password, args.smtp_server, args.smtp_port, html)
+            logger.success("Email sent successfully! If you don't receive the email, please check the configuration and the junk box.")
+        else:
+            logger.warning("Email configuration not provided, skipping email notification.")
+    
+    logger.success("Notification process completed!")
 
