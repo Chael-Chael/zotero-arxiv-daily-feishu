@@ -122,14 +122,9 @@ def build_paper_detail_element(paper: ArxivPaper, index: int) -> list[dict]:
             aff_text += f" +{len(affiliations) - 3}"
         elements.append({"tag": "markdown", "content": f"🏛️ 机构: {aff_text}"})
     
-    # 框架图
+    # 框架图 (使用 markdown 格式嵌入 URL)
     if paper.framework_figure:
-        elements.append({"tag": "markdown", "content": "**📊 模型框架**"})
-        elements.append({
-            "tag": "img",
-            "img_key": paper.framework_figure,
-            "alt": {"tag": "plain_text", "content": "Model Framework"}
-        })
+        elements.append({"tag": "markdown", "content": f"**📊 模型框架**\n![框架图]({paper.framework_figure})"})
     
     # 中文摘要翻译
     elements.append({"tag": "markdown", "content": "**摘要**"})
