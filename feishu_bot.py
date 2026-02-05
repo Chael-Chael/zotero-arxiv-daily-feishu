@@ -114,6 +114,23 @@ def build_paper_detail_element(paper: ArxivPaper, index: int) -> list[dict]:
     elements.append({"tag": "markdown", "content": f"📎 arXiv ID: {paper.arxiv_id}"})
     elements.append({"tag": "markdown", "content": f"🔗 论文链接: {links}"})
     
+    # 作者机构
+    affiliations = paper.affiliations_from_html
+    if affiliations:
+        aff_text = " | ".join(affiliations[:3])  # 最多展示3个机构
+        if len(affiliations) > 3:
+            aff_text += f" +{len(affiliations) - 3}"
+        elements.append({"tag": "markdown", "content": f"🏛️ 机构: {aff_text}"})
+    
+    # 框架图
+    if paper.framework_figure:
+        elements.append({"tag": "markdown", "content": "**📊 模型框架**"})
+        elements.append({
+            "tag": "img",
+            "img_key": paper.framework_figure,
+            "alt": {"tag": "plain_text", "content": "Model Framework"}
+        })
+    
     # 中文摘要翻译
     elements.append({"tag": "markdown", "content": "**摘要**"})
     elements.append({"tag": "markdown", "content": paper.tldr})
@@ -156,18 +173,19 @@ def _send_card_message(webhook_url: str, card: dict, secret: Optional[str] = Non
 
 def send_feishu_message(
     webhook_url: str, 
-    daily_papers: list[ArxivPaper], 
-    monthly_papers: list[ArxivPaper] = None,
+    grouped_results: dict[str, list[ArxivPaper]], 
     secret: Optional[str] = None
 ) -> bool:
     """
     发送消息到飞书群
-    拆分成多条消息发送，避免元素数量超限
-    """
-    if monthly_papers is None:
-        monthly_papers = []
     
-    total = len(daily_papers) + len(monthly_papers)
+    Args:
+        webhook_url: 飞书 webhook URL
+        grouped_results: 按方向分组的论文字典 {方向名: 论文列表}
+        secret: 签名密钥
+    """
+    # 计算总论文数
+    total = sum(len(papers) for papers in grouped_results.values())
     today = datetime.datetime.now().strftime('%Y-%m-%d')
     
     if total == 0:
@@ -189,27 +207,29 @@ def send_feishu_message(
     
     success = True
     
-    # === 第一条消息：概览和表格 ===
+    # === 第一条消息：概览和各方向表格 ===
     elements = []
     
     # 头部信息
-    elements.append({
-        "tag": "markdown", 
-        "content": f"ArXiv Today 小助手来啦٩(๑>◡<๑)۶！\n今日找到了 **{total}** 篇相关论文 ⁽⁽٩(๑˃̶͈̀ ᗨ ˂̶͈́)۶⁾⁾"
-    })
+    direction_count = len(grouped_results)
+    if direction_count > 1:
+        elements.append({
+            "tag": "markdown", 
+            "content": f"ArXiv Today 小助手来啦٩(๑>◡<๑)۶！\n今日找到了 **{total}** 篇相关论文，覆盖 **{direction_count}** 个方向 ⁽⁽٩(๑˃̶͈̀ ᗨ ˂̶͈́)۶⁾⁾"
+        })
+    else:
+        elements.append({
+            "tag": "markdown", 
+            "content": f"ArXiv Today 小助手来啦٩(๑>◡<๑)۶！\n今日找到了 **{total}** 篇相关论文 ⁽⁽٩(๑˃̶͈̀ ᗨ ˂̶͈́)۶⁾⁾"
+        })
     
-    # 每日论文表格
-    if daily_papers:
+    # 按方向展示表格
+    for direction_name, papers in grouped_results.items():
+        if not papers:
+            continue
         elements.append({"tag": "hr"})
-        elements.append({"tag": "markdown", "content": "### 📅 今日最新"})
-        table_elements = build_paper_table(daily_papers, start_index=1)
-        elements.extend(table_elements)
-    
-    # 月度论文表格
-    if monthly_papers:
-        elements.append({"tag": "hr"})
-        elements.append({"tag": "markdown", "content": "### 📊 月度精选"})
-        table_elements = build_paper_table(monthly_papers, start_index=1)
+        elements.append({"tag": "markdown", "content": f"### 📁 {direction_name}"})
+        table_elements = build_paper_table(papers, start_index=1)
         elements.extend(table_elements)
     
     card = {
@@ -229,19 +249,21 @@ def send_feishu_message(
     
     time.sleep(1)  # 发送间隔，避免限流
     
-    # === 后续消息：论文详情，每批最多 3 篇 ===
+    # === 后续消息：每个方向的论文详情 ===
     BATCH_SIZE = 5
     
-    # 每日论文详情
-    if daily_papers:
-        for batch_start in range(0, len(daily_papers), BATCH_SIZE):
-            batch_papers = daily_papers[batch_start:batch_start + BATCH_SIZE]
+    for direction_name, papers in grouped_results.items():
+        if not papers:
+            continue
+            
+        for batch_start in range(0, len(papers), BATCH_SIZE):
+            batch_papers = papers[batch_start:batch_start + BATCH_SIZE]
             batch_num = batch_start // BATCH_SIZE + 1
-            total_batches = (len(daily_papers) + BATCH_SIZE - 1) // BATCH_SIZE
+            total_batches = (len(papers) + BATCH_SIZE - 1) // BATCH_SIZE
             
             elements = []
             
-            for i, paper in enumerate(tqdm(batch_papers, desc=f'Building daily details batch {batch_num}')):
+            for i, paper in enumerate(tqdm(batch_papers, desc=f'Building {direction_name} details batch {batch_num}')):
                 global_idx = batch_start + i + 1
                 detail_elements = build_paper_detail_element(paper, global_idx)
                 elements.extend(detail_elements)
@@ -250,41 +272,9 @@ def send_feishu_message(
             card = {
                 "schema": "2.0",
                 "header": {
-                    "title": {"tag": "plain_text", "content": "📅 今日最新 - 详情"},
+                    "title": {"tag": "plain_text", "content": f"📁 {direction_name} - 详情"},
                     "subtitle": {"tag": "plain_text", "content": f"{today} ({batch_num}/{total_batches})"},
                     "template": "turquoise"
-                },
-                "body": {
-                    "elements": elements
-                }
-            }
-            
-            if not _send_card_message(webhook_url, card, secret):
-                success = False
-            
-            time.sleep(1)
-    
-    # 月度论文详情
-    if monthly_papers:
-        for batch_start in range(0, len(monthly_papers), BATCH_SIZE):
-            batch_papers = monthly_papers[batch_start:batch_start + BATCH_SIZE]
-            batch_num = batch_start // BATCH_SIZE + 1
-            total_batches = (len(monthly_papers) + BATCH_SIZE - 1) // BATCH_SIZE
-            
-            elements = []
-            
-            for i, paper in enumerate(tqdm(batch_papers, desc=f'Building monthly details batch {batch_num}')):
-                global_idx = batch_start + i + 1
-                detail_elements = build_paper_detail_element(paper, global_idx)
-                elements.extend(detail_elements)
-                time.sleep(5)
-            
-            card = {
-                "schema": "2.0",
-                "header": {
-                    "title": {"tag": "plain_text", "content": "📊 月度精选 - 详情"},
-                    "subtitle": {"tag": "plain_text", "content": f"{today} ({batch_num}/{total_batches})"},
-                    "template": "purple"
                 },
                 "body": {
                     "elements": elements

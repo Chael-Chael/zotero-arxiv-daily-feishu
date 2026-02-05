@@ -12,6 +12,8 @@ from loguru import logger
 import tiktoken
 from contextlib import ExitStack
 from urllib.error import HTTPError
+from urllib.parse import urljoin
+from bs4 import BeautifulSoup
 
 
 
@@ -252,3 +254,110 @@ __ABSTRACT__
                 logger.debug(f"Failed to extract affiliations of {self.arxiv_id}: {e}")
                 return None
             return affiliations
+
+    @cached_property
+    def affiliations_from_html(self) -> Optional[list[str]]:
+        """从 arXiv HTML 页面提取作者机构信息"""
+        url = f"https://arxiv.org/html/{self.arxiv_id}"
+        try:
+            resp = requests.get(url, timeout=30)
+            if resp.status_code != 200:
+                logger.debug(f"HTML version not available for {self.arxiv_id}")
+                return self.affiliations  # 回退到 LaTeX 提取
+        except Exception as e:
+            logger.debug(f"Failed to fetch HTML for {self.arxiv_id}: {e}")
+            return self.affiliations
+        
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        affiliations = []
+        
+        # 尝试从作者区域提取机构信息
+        # arXiv HTML 通常在 .ltx_authors 或 .authors 类中包含作者信息
+        author_section = soup.find(class_='ltx_authors') or soup.find(class_='authors')
+        if author_section:
+            # 查找机构标签（通常是 .ltx_role_affiliation 或带有 affiliation 的元素）
+            affil_elements = author_section.find_all(class_='ltx_role_affiliation')
+            if not affil_elements:
+                affil_elements = author_section.find_all(class_='ltx_contact_affiliation')
+            if not affil_elements:
+                # 尝试查找 superscript 标注的机构
+                affil_elements = soup.find_all(class_='ltx_note_content')
+            
+            for elem in affil_elements:
+                text = elem.get_text(strip=True)
+                if text and len(text) > 2 and text not in affiliations:
+                    affiliations.append(text)
+        
+        if affiliations:
+            # 去重并限制数量
+            seen = set()
+            unique_affiliations = []
+            for aff in affiliations:
+                # 简化机构名（取第一部分或保留前50字符）
+                aff_clean = aff[:80]
+                if aff_clean not in seen:
+                    seen.add(aff_clean)
+                    unique_affiliations.append(aff_clean)
+            return unique_affiliations[:5]  # 最多返回5个机构
+        
+        # 回退到 LaTeX 提取
+        return self.affiliations
+
+    @cached_property
+    def framework_figure(self) -> Optional[str]:
+        """获取论文框架图 URL（通过解析 arXiv HTML + LLM 选择）"""
+        url = f"https://arxiv.org/html/{self.arxiv_id}"
+        try:
+            resp = requests.get(url, timeout=30)
+            if resp.status_code != 200:
+                logger.debug(f"HTML version not available for {self.arxiv_id}")
+                return None
+        except Exception as e:
+            logger.debug(f"Failed to fetch HTML for {self.arxiv_id}: {e}")
+            return None
+        
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        figures_info = []
+        
+        for fig in soup.find_all('figure'):
+            img = fig.find('img')
+            caption = fig.find('figcaption')
+            if img and img.get('src'):
+                figures_info.append({
+                    'url': urljoin(url, img['src']),
+                    'caption': caption.get_text(strip=True)[:200] if caption else '',
+                    'alt': img.get('alt', '')[:100]
+                })
+        
+        if not figures_info:
+            logger.debug(f"No figures found in HTML for {self.arxiv_id}")
+            return None
+        
+        if len(figures_info) == 1:
+            return figures_info[0]['url']
+        
+        # 使用 LLM 选择模型框架图
+        prompt = "以下是一篇论文的图片描述列表，请选出最能展示模型框架/架构的那张图，只返回其索引(0-based数字)，如果没有框架图则返回-1:\n"
+        for i, fig in enumerate(figures_info):
+            caption_text = fig['caption'] or fig['alt'] or '(无描述)'
+            prompt += f"{i}: {caption_text}\n"
+        
+        llm = get_llm()
+        try:
+            result = llm.generate(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是一个学术论文图片分析助手。请根据图片描述选出展示模型架构/框架的图片。只返回一个数字索引，不要其他内容。",
+                    },
+                    {"role": "user", "content": prompt},
+                ]
+            )
+            idx = int(re.search(r'-?\d+', result).group(0))
+            if 0 <= idx < len(figures_info):
+                return figures_info[idx]['url']
+        except Exception as e:
+            logger.debug(f"Failed to select framework figure for {self.arxiv_id}: {e}")
+        
+        # 回退：返回第一张图
+        return figures_info[0]['url']

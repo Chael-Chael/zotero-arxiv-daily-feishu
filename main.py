@@ -61,6 +61,26 @@ def filter_corpus(corpus:list[dict], pattern:str) -> list[dict]:
     return new_corpus
 
 
+def filter_corpus_by_collections(corpus: list[dict], collection_names: list[str]) -> dict[str, list[dict]]:
+    """按指定的文件夹名称分组语料库
+    
+    Args:
+        corpus: 完整语料库
+        collection_names: 要筛选的文件夹名称列表
+        
+    Returns:
+        按文件夹名称分组的语料库字典
+    """
+    result = {name: [] for name in collection_names}
+    for c in corpus:
+        for path in c['paths']:
+            for name in collection_names:
+                if name in path:
+                    result[name].append(c)
+                    break  # 每篇文章每个方向只加一次
+    return result
+
+
 def get_arxiv_paper(query:str, debug:bool=False) -> list[ArxivPaper]:
     """获取每日新论文（前一天发布的）"""
     client = arxiv.Client(num_retries=10,delay_seconds=10)
@@ -89,36 +109,6 @@ def get_arxiv_paper(query:str, debug:bool=False) -> list[ArxivPaper]:
 
     return papers
 
-
-def get_arxiv_monthly_papers(query: str, max_results: int = 100) -> list[ArxivPaper]:
-    """获取近一个月的论文用于月度推荐"""
-    import datetime
-    client = arxiv.Client(num_retries=10, delay_seconds=10)
-    
-    # 构建查询：指定类别，按提交时间排序
-    categories = query.replace('+', ' OR cat:')
-    search_query = f"cat:{categories}"
-    
-    search = arxiv.Search(
-        query=search_query,
-        max_results=max_results,
-        sort_by=arxiv.SortCriterion.SubmittedDate,
-        sort_order=arxiv.SortOrder.Descending
-    )
-    
-    papers = []
-    one_month_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)
-    
-    logger.info(f"Retrieving monthly papers (last 30 days)...")
-    for result in tqdm(client.results(search), desc="Retrieving monthly papers", total=max_results):
-        # 只保留近一个月的论文
-        if result.published.replace(tzinfo=datetime.timezone.utc) >= one_month_ago:
-            papers.append(ArxivPaper(result))
-        else:
-            break  # 论文按时间排序，遇到超过一个月的就停止
-    
-    logger.info(f"Retrieved {len(papers)} papers from the last month.")
-    return papers
 
 
 
@@ -153,7 +143,13 @@ if __name__ == '__main__':
     add_argument('--send_empty', type=bool, help='If get no arxiv paper, send empty email',default=False)
     add_argument('--max_paper_num', type=int, help='Maximum number of papers to recommend',default=100)
     add_argument('--daily_paper_num', type=int, help='Number of daily new papers to show',default=5)
-    add_argument('--monthly_paper_num', type=int, help='Number of monthly papers to show',default=10)
+    add_argument(
+        '--zotero_collections',
+        type=str,
+        help='Comma-separated Zotero collection names for grouped recommendations (e.g., "流式生成,图像生成,多模态")',
+        default=None,
+    )
+
     add_argument('--arxiv_query', type=str, help='Arxiv search query')
     add_argument('--smtp_server', type=str, help='SMTP server')
     add_argument('--smtp_port', type=int, help='SMTP port')
@@ -240,28 +236,34 @@ if __name__ == '__main__':
     logger.info("Retrieving daily Arxiv papers...")
     daily_papers = get_arxiv_paper(args.arxiv_query, args.debug)
     
-    # 获取月度论文
-    logger.info("Retrieving monthly Arxiv papers...")
-    monthly_papers = get_arxiv_monthly_papers(args.arxiv_query, max_results=2000)
-    
-    # 排序
-    if len(daily_papers) > 0:
-        logger.info("Reranking daily papers...")
-        daily_papers = rerank_paper(daily_papers, corpus)
-        daily_papers = daily_papers[:args.daily_paper_num]
-    
-    if len(monthly_papers) > 0:
-        logger.info("Reranking monthly papers...")
-        # 排除已在每日推荐中的论文
-        daily_ids = {p.arxiv_id for p in daily_papers}
-        monthly_papers = [p for p in monthly_papers if p.arxiv_id not in daily_ids]
-        monthly_papers = rerank_paper(monthly_papers, corpus)
-        monthly_papers = monthly_papers[:args.monthly_paper_num]
-    
-    if len(daily_papers) == 0 and len(monthly_papers) == 0:
+    if len(daily_papers) == 0:
         logger.info("No papers found.")
         if not args.send_empty:
             exit(0)
+    
+    # 按方向分组推荐 or 全局推荐
+    grouped_results = {}  # {方向名: 推荐论文列表}
+    
+    if args.zotero_collections:
+        # 按文件夹分组推荐
+        collection_names = [name.strip() for name in args.zotero_collections.split(',')]
+        logger.info(f"Grouping recommendations by collections: {collection_names}")
+        grouped_corpus = filter_corpus_by_collections(corpus, collection_names)
+        
+        for collection_name, collection_corpus in grouped_corpus.items():
+            if len(collection_corpus) == 0:
+                logger.warning(f"No papers found in collection '{collection_name}', skipping.")
+                continue
+            logger.info(f"Reranking papers for collection '{collection_name}' ({len(collection_corpus)} corpus papers)...")
+            ranked_papers = rerank_paper(daily_papers.copy(), collection_corpus)
+            grouped_results[collection_name] = ranked_papers[:args.daily_paper_num]
+    else:
+        # 全局推荐（原有逻辑）
+        if len(daily_papers) > 0:
+            logger.info("Reranking daily papers...")
+            daily_papers = rerank_paper(daily_papers, corpus)
+            daily_papers = daily_papers[:args.daily_paper_num]
+        grouped_results["今日推荐"] = daily_papers
 
     # 根据配置选择通知方式
     notify_method = args.notify_method.lower() if args.notify_method else 'feishu'
@@ -269,13 +271,16 @@ if __name__ == '__main__':
     if notify_method in ['feishu', 'both']:
         if args.feishu_webhook_url:
             logger.info("Sending Feishu message...")
-            send_feishu_message(args.feishu_webhook_url, daily_papers, monthly_papers, args.feishu_secret)
+            send_feishu_message(args.feishu_webhook_url, grouped_results, args.feishu_secret)
         else:
             logger.warning("Feishu webhook URL not provided, skipping Feishu notification.")
     
     if notify_method in ['email', 'both']:
         if args.sender and args.receiver:
-            all_papers = daily_papers + monthly_papers
+            # 邮件暂时使用合并的论文列表
+            all_papers = []
+            for papers in grouped_results.values():
+                all_papers.extend(papers)
             html = render_email(all_papers)
             logger.info("Sending email...")
             send_email(args.sender, args.receiver, args.sender_password, args.smtp_server, args.smtp_port, html)
