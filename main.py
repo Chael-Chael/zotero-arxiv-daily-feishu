@@ -81,6 +81,68 @@ def filter_corpus_by_collections(corpus: list[dict], collection_names: list[str]
     return result
 
 
+def get_papers_from_external_rss(rss_url: str, debug: bool = False) -> list[ArxivPaper]:
+    """从外部 RSS 源获取论文，提取其中的 arXiv ID 并转换为 ArxivPaper
+    
+    Args:
+        rss_url: 外部 RSS 源的 URL
+        debug: 是否为调试模式
+    """
+    from datetime import datetime, timedelta, timezone
+    
+    logger.info(f"Fetching papers from external RSS: {rss_url}")
+    feed = feedparser.parse(rss_url)
+    
+    if not feed.entries:
+        logger.warning(f"No entries found in external RSS: {rss_url}")
+        return []
+    
+    # 只获取最近 7 天的论文
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=7)
+    arxiv_ids = []
+    
+    for entry in feed.entries:
+        # 检查发布日期
+        if hasattr(entry, 'published_parsed') and entry.published_parsed:
+            from time import mktime
+            pub_time = datetime.fromtimestamp(mktime(entry.published_parsed), tz=timezone.utc)
+            if pub_time < cutoff_date:
+                continue
+        
+        # 尝试从链接或内容中提取 arXiv ID
+        import re
+        link = entry.get('link', '')
+        content = entry.get('summary', '') + entry.get('content', [{}])[0].get('value', '') if entry.get('content') else entry.get('summary', '')
+        
+        # 匹配 arXiv ID 模式: YYMM.NNNNN 或 arxiv.org/abs/YYMM.NNNNN
+        arxiv_pattern = r'(?:arxiv\.org/(?:abs|pdf)/)?([0-9]{4}\.[0-9]{4,5})'
+        matches = re.findall(arxiv_pattern, link + ' ' + content)
+        arxiv_ids.extend(matches)
+    
+    # 去重
+    arxiv_ids = list(set(arxiv_ids))
+    logger.info(f"Found {len(arxiv_ids)} arXiv IDs from external RSS")
+    
+    if not arxiv_ids:
+        return []
+    
+    if debug:
+        arxiv_ids = arxiv_ids[:3]
+    
+    # 使用 arXiv API 获取完整信息
+    client = arxiv.Client(num_retries=10, delay_seconds=10)
+    papers = []
+    bar = tqdm(total=len(arxiv_ids), desc="Retrieving external RSS papers")
+    for i in range(0, len(arxiv_ids), 20):
+        search = arxiv.Search(id_list=arxiv_ids[i:i+20])
+        batch = [ArxivPaper(p) for p in client.results(search)]
+        bar.update(len(batch))
+        papers.extend(batch)
+    bar.close()
+    
+    return papers
+
+
 def get_arxiv_paper(query:str, debug:bool=False) -> list[ArxivPaper]:
     """获取每日新论文（前一天发布的）"""
     client = arxiv.Client(num_retries=10,delay_seconds=10)
@@ -151,6 +213,12 @@ if __name__ == '__main__':
     )
 
     add_argument('--arxiv_query', type=str, help='Arxiv search query')
+    add_argument(
+        '--external_rss',
+        type=str,
+        help='External RSS feed URL to fetch additional papers (e.g., https://awesome-llm-papers.github.io/feed/publications.xml)',
+        default=None,
+    )
     add_argument('--smtp_server', type=str, help='SMTP server')
     add_argument('--smtp_port', type=int, help='SMTP port')
     add_argument('--sender', type=str, help='Sender email address')
@@ -236,7 +304,16 @@ if __name__ == '__main__':
     logger.info("Retrieving daily Arxiv papers...")
     daily_papers = get_arxiv_paper(args.arxiv_query, args.debug)
     
-    if len(daily_papers) == 0:
+    # 从外部 RSS 获取论文（单独处理，不合并）
+    external_papers = []
+    if args.external_rss:
+        external_papers = get_papers_from_external_rss(args.external_rss, args.debug)
+        # 去重（排除已在每日论文中的）
+        existing_ids = {p.arxiv_id for p in daily_papers}
+        external_papers = [p for p in external_papers if p.arxiv_id not in existing_ids]
+        logger.info(f"Got {len(external_papers)} papers from external RSS (after dedup)")
+    
+    if len(daily_papers) == 0 and len(external_papers) == 0:
         logger.info("No papers found.")
         if not args.send_empty:
             exit(0)
@@ -264,6 +341,13 @@ if __name__ == '__main__':
             daily_papers = rerank_paper(daily_papers, corpus)
             daily_papers = daily_papers[:args.daily_paper_num]
         grouped_results["今日推荐"] = daily_papers
+    
+    # 外部 RSS 论文作为单独分组
+    if external_papers:
+        # 对外部 RSS 论文也进行排序
+        logger.info("Reranking external RSS papers...")
+        external_papers = rerank_paper(external_papers, corpus)
+        grouped_results["📰 LLM精选"] = external_papers[:args.daily_paper_num]
 
     # 根据配置选择通知方式
     notify_method = args.notify_method.lower() if args.notify_method else 'feishu'

@@ -62,15 +62,18 @@ def build_paper_table(papers: list[ArxivPaper], start_index: int = 1) -> list[di
     for i, paper in enumerate(papers, start_index):
         # 截断标题
         title = paper.title[:35] + "..." if len(paper.title) > 35 else paper.title
-        # 从 arXiv ID 解析发布年月 (格式: YYMM.NNNNN)
-        try:
-            arxiv_id_prefix = paper.arxiv_id.split('.')[0]  # e.g., "2501"
-            year = 2000 + int(arxiv_id_prefix[:2])
-            month = int(arxiv_id_prefix[2:])
-            pub_date = f"{year}-{month:02d}"
-        except (ValueError, IndexError):
-            # 回退到 API 返回的日期
-            pub_date = paper._paper.published.strftime('%Y-%m-%d') if paper._paper.published else 'N/A'
+        # 使用 API 返回的发布日期（精确到天）
+        if paper._paper.published:
+            pub_date = paper._paper.published.strftime('%Y-%m-%d')
+        else:
+            # 回退：从 arXiv ID 解析发布年月 (格式: YYMM.NNNNN)
+            try:
+                arxiv_id_prefix = paper.arxiv_id.split('.')[0]
+                year = 2000 + int(arxiv_id_prefix[:2])
+                month = int(arxiv_id_prefix[2:])
+                pub_date = f"{year}-{month:02d}"
+            except (ValueError, IndexError):
+                pub_date = 'N/A'
         
         row = {
             "tag": "column_set",
@@ -114,6 +117,9 @@ def build_paper_detail_element(paper: ArxivPaper, index: int) -> list[dict]:
     elements.append({"tag": "markdown", "content": f"📎 arXiv ID: {paper.arxiv_id}"})
     elements.append({"tag": "markdown", "content": f"🔗 论文链接: {links}"})
     
+    # 作者列表
+    elements.append({"tag": "markdown", "content": f"👥 作者: {authors}"})
+    
     # 作者机构
     affiliations = paper.affiliations_from_html
     if affiliations:
@@ -122,9 +128,10 @@ def build_paper_detail_element(paper: ArxivPaper, index: int) -> list[dict]:
             aff_text += f" +{len(affiliations) - 3}"
         elements.append({"tag": "markdown", "content": f"🏛️ 机构: {aff_text}"})
     
-    # 框架图 (使用 markdown 格式嵌入 URL)
+    # 框架图 (飞书不支持外部图片URL，且markdown链接中的.png URL会被识别为image_key导致报错)
     if paper.framework_figure:
-        elements.append({"tag": "markdown", "content": f"**📊 模型框架**\n![框架图]({paper.framework_figure})"})
+        html_page_url = f"https://arxiv.org/html/{paper.arxiv_id}"
+        elements.append({"tag": "markdown", "content": f"📊 [查看模型框架图]({html_page_url})"})
     
     # 中文摘要翻译
     elements.append({"tag": "markdown", "content": "**摘要**"})
