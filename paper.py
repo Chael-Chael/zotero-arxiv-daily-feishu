@@ -256,7 +256,7 @@ class ArxivPaper:
             
             user_prompt = f"""请读取以下论文的完整内容，并严格按照以下三个板块进行输出：
 
-## ⚡ 核心三问 (The Elevator Pitch)
+⚡ 核心三问 (The Elevator Pitch):
 用最简练的语言（每个问题不超过 3 句话）直击要害：
 
 **Q1: 这篇论文试图解决什么核心痛点/问题？** (What is the problem?)
@@ -267,7 +267,7 @@ class ArxivPaper:
 **Q3: 最终效果/结论如何？** (What are the results?)
 (列出 1-2 个关键数据证明其有效性)
 
-## 📖 逻辑故事还原 (The Logic Flow)
+📖 逻辑故事还原 (The Logic Flow):
 不要堆砌技术细节，而是还原作者的思考路径。请按"起承转合"的结构讲解：
 
 **背景 (Context):** 为什么大家之前解决不好这个问题？（现有方法的缺陷）
@@ -277,7 +277,7 @@ class ArxivPaper:
 
 **拆解 (Deconstruction):** 这个方法具体分哪几步实现的？（用 1, 2, 3 列表简洁描述输入到输出的过程）
 
-## 🔍 关键细节与启示 (Details & Takeaway)
+🔍 关键细节与启示 (Details & Takeaway):
 
 **技术细节补充：** 补充 1-2 个最关键的技术实现细节（比如某个特殊的 Loss Function 或数据处理技巧）。
 
