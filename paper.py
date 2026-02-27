@@ -86,15 +86,9 @@ class ArxivPaper:
                 # 尝试下载源文件
                 file = self._paper.download_source(dirpath=tmpdirname)
             except HTTPError as e:
-                # 捕获 HTTP 错误
-                if e.code == 404:
-                    # 如果是 404 Not Found，说明源文件不存在，这是正常情况
-                    logger.warning(f"Source for {self.arxiv_id} not found (404). Skipping source analysis.")
-                    return None # 直接返回 None，后续依赖 tex 的代码会安全地处理
-                else:
-                    # 如果是其他 HTTP 错误 (如 503)，这可能是临时性问题，值得记录下来
-                    logger.error(f"HTTP Error {e.code} when downloading source for {self.arxiv_id}: {e.reason}")
-                    raise # 重新抛出异常，因为这可能是个需要关注的严重问题
+                # 捕获 HTTP 错误 (404=源文件不存在, 403=禁止访问, 503=服务暂不可用 等)
+                logger.warning(f"Source for {self.arxiv_id} not available (HTTP {e.code}). Skipping source analysis.")
+                return None
             except Exception as e:
                 logger.error(f"Error when downloading source for {self.arxiv_id}: {e}")
                 return None
@@ -189,15 +183,67 @@ class ArxivPaper:
         content = re.sub(r'\\end\{document\}', '', content)
         return content.strip()
 
+    def _get_html_content(self) -> Optional[str]:
+        """从 arXiv HTML 页面获取论文纯文本内容，作为 TeX 不可用时的降级方案"""
+        url = f"https://arxiv.org/html/{self.arxiv_id}"
+        try:
+            resp = requests.get(url, timeout=30)
+            if resp.status_code != 200:
+                logger.debug(f"HTML version not available for {self.arxiv_id}")
+                return None
+        except Exception as e:
+            logger.debug(f"Failed to fetch HTML for {self.arxiv_id}: {e}")
+            return None
+        
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        
+        # 移除不需要的元素
+        for tag in soup.find_all(['script', 'style', 'nav', 'header', 'footer']):
+            tag.decompose()
+        for tag in soup.find_all('figure'):
+            tag.decompose()
+        for tag in soup.find_all('table'):
+            tag.decompose()
+        # 移除参考文献部分
+        for tag in soup.find_all(class_=re.compile(r'ltx_bibliography|ltx_references')):
+            tag.decompose()
+        
+        # 获取主要文章内容
+        article = soup.find('article') or soup.find(class_='ltx_document') or soup.find('body')
+        if article is None:
+            return None
+        
+        text = article.get_text(separator='\n', strip=True)
+        # 清理多余空行
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        if len(text) < 100:  # 内容太短，可能不是有效的论文页面
+            return None
+        
+        return text
+
     @cached_property
     def tldr(self) -> str:
         llm = get_llm()
         enc = tiktoken.encoding_for_model("gpt-4o")
+        is_online_model = isinstance(llm.llm, OpenAI)
         
-        cleaned_tex = self._clean_tex_content()
-        use_full_paper = cleaned_tex is not None and isinstance(llm.llm, OpenAI)
+        # 三级降级策略：TeX全文 → HTML全文 → 摘要翻译
+        paper_content = None
+        content_source = None
         
-        if use_full_paper:
+        if is_online_model:
+            # 优先尝试 TeX
+            paper_content = self._clean_tex_content()
+            if paper_content:
+                content_source = "TeX"
+            else:
+                # TeX 不可用，尝试 HTML
+                paper_content = self._get_html_content()
+                if paper_content:
+                    content_source = "HTML"
+        
+        if paper_content and content_source:
             # 使用完整论文内容 + 深度解读 prompt
             system_prompt = (
                 "你是顶尖大学资深教授，精通【人工智能和计算机科学】领域。逻辑思维清晰。"
@@ -241,8 +287,8 @@ class ArxivPaper:
 
 论文标题：{self.title}
 
-论文完整内容：
-{cleaned_tex}
+论文完整内容（来源：{content_source}）：
+{paper_content}
 """
             # 截断到 100k tokens 以适应 128k 上下文窗口（留空间给 system prompt 和输出）
             prompt_tokens = enc.encode(user_prompt)
@@ -252,9 +298,9 @@ class ArxivPaper:
                 prompt_tokens = prompt_tokens[:100000]
                 user_prompt = enc.decode(prompt_tokens)
             
-            logger.info(f"[{self.arxiv_id}] 全文解读模式 | TeX原文 {original_token_count} tokens，实际发送 {len(prompt_tokens)} tokens")
+            logger.info(f"[{self.arxiv_id}] 全文解读模式（{content_source}）| 原文 {original_token_count} tokens，实际发送 {len(prompt_tokens)} tokens")
         else:
-            # 降级模式：仅翻译摘要（用于本地模型或无 TeX 的情况）
+            # 降级模式：仅翻译摘要（用于本地模型或无 TeX/HTML 的情况）
             system_prompt = "你是一位专业的学术论文翻译助手，擅长将英文论文摘要准确、完整地翻译成目标语言。请保持学术风格，不要省略任何重要信息。"
             user_prompt = f"""请将以下论文的摘要翻译成{llm.lang}，保持完整性，不要过度简化或省略内容：
 
