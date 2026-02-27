@@ -133,8 +133,8 @@ def build_paper_detail_element(paper: ArxivPaper, index: int) -> list[dict]:
         html_page_url = f"https://arxiv.org/html/{paper.arxiv_id}"
         elements.append({"tag": "markdown", "content": f"📊 [查看模型框架图]({html_page_url})"})
     
-    # 中文摘要翻译
-    elements.append({"tag": "markdown", "content": "**摘要**"})
+    # 论文解读
+    elements.append({"tag": "markdown", "content": "**论文解读**"})
     elements.append({"tag": "markdown", "content": paper.tldr})
     
     return elements

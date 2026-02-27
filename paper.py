@@ -14,6 +14,7 @@ from contextlib import ExitStack
 from urllib.error import HTTPError
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
+from openai import OpenAI
 
 
 
@@ -162,53 +163,114 @@ class ArxivPaper:
                 file_contents["all"] = None
         return file_contents
     
+    def _clean_tex_content(self) -> Optional[str]:
+        """清理 TeX 内容，移除引用、图表、公式等非文本元素"""
+        if self.tex is None:
+            return None
+        content = self.tex.get("all")
+        if content is None:
+            content = "\n".join(self.tex.values())
+        # remove cite
+        content = re.sub(r'~?\\cite.?\{.*?\}', '', content)
+        # remove figure
+        content = re.sub(r'\\begin\{figure\}.*?\\end\{figure\}', '', content, flags=re.DOTALL)
+        content = re.sub(r'\\begin\{figure\*\}.*?\\end\{figure\*\}', '', content, flags=re.DOTALL)
+        # remove table
+        content = re.sub(r'\\begin\{table\}.*?\\end\{table\}', '', content, flags=re.DOTALL)
+        content = re.sub(r'\\begin\{table\*\}.*?\\end\{table\*\}', '', content, flags=re.DOTALL)
+        # remove bibliography
+        content = re.sub(r'\\begin\{thebibliography\}.*?\\end\{thebibliography\}', '', content, flags=re.DOTALL)
+        content = re.sub(r'\\bibliography\{.*?\}', '', content)
+        # remove preamble (before \begin{document})
+        doc_start = re.search(r'\\begin\{document\}', content)
+        if doc_start:
+            content = content[doc_start.end():]
+        # remove \end{document}
+        content = re.sub(r'\\end\{document\}', '', content)
+        return content.strip()
+
     @cached_property
     def tldr(self) -> str:
-        introduction = ""
-        conclusion = ""
-        if self.tex is not None:
-            content = self.tex.get("all")
-            if content is None:
-                content = "\n".join(self.tex.values())
-            #remove cite
-            content = re.sub(r'~?\\cite.?\{.*?\}', '', content)
-            #remove figure
-            content = re.sub(r'\\begin\{figure\}.*?\\end\{figure\}', '', content, flags=re.DOTALL)
-            #remove table
-            content = re.sub(r'\\begin\{table\}.*?\\end\{table\}', '', content, flags=re.DOTALL)
-            #find introduction and conclusion
-            # end word can be \section or \end{document} or \bibliography or \appendix
-            match = re.search(r'\\section\{Introduction\}.*?(\\section|\\end\{document\}|\\bibliography|\\appendix|$)', content, flags=re.DOTALL)
-            if match:
-                introduction = match.group(0)
-            match = re.search(r'\\section\{Conclusion\}.*?(\\section|\\end\{document\}|\\bibliography|\\appendix|$)', content, flags=re.DOTALL)
-            if match:
-                conclusion = match.group(0)
         llm = get_llm()
-        prompt = """请将以下论文的摘要翻译成__LANG__，保持完整性，不要过度简化或省略内容：
+        enc = tiktoken.encoding_for_model("gpt-4o")
+        
+        cleaned_tex = self._clean_tex_content()
+        use_full_paper = cleaned_tex is not None and isinstance(llm.llm, OpenAI)
+        
+        if use_full_paper:
+            # 使用完整论文内容 + 深度解读 prompt
+            system_prompt = (
+                "你是顶尖大学资深教授，精通【人工智能和计算机科学】领域。逻辑思维清晰。"
+                "你现在的任务是帮助科研人员快速透彻地理解一篇学术论文。"
+                "你需要将晦涩的学术语言转化为逻辑清晰、通俗易懂的中文讲解。\n"
+                "语气风格：像一位耐心的导师，用'口语化'但'逻辑严密'的方式讲解。\n"
+                "核心原则：遇到专业术语时，必须先用一个生活中的比喻/例子来解释它，然后再讲它的学术定义。\n"
+                "格式要求：使用 Markdown 格式，使用加粗来突出重点，使用引用块来解释概念。"
+            )
+            
+            user_prompt = f"""请读取以下论文的完整内容，并严格按照以下三个板块进行输出：
 
-论文标题：__TITLE__
+## ⚡ 核心三问 (The Elevator Pitch)
+用最简练的语言（每个问题不超过 3 句话）直击要害：
+
+**Q1: 这篇论文试图解决什么核心痛点/问题？** (What is the problem?)
+
+**Q2: 作者提出了什么新的"杀手锏"方法/架构？** (What is the method?)
+(简要说明该方法的核心创新点，区别于传统方法的地方)
+
+**Q3: 最终效果/结论如何？** (What are the results?)
+(列出 1-2 个关键数据证明其有效性)
+
+## 📖 逻辑故事还原 (The Logic Flow)
+不要堆砌技术细节，而是还原作者的思考路径。请按"起承转合"的结构讲解：
+
+**背景 (Context):** 为什么大家之前解决不好这个问题？（现有方法的缺陷）
+
+**破局 (Insight):** 作者是怎么灵光一现的？他的核心直觉 (Intuition) 是什么？
+👉 [请插入一个通俗的比喻来解释这个核心直觉]
+
+**拆解 (Deconstruction):** 这个方法具体分哪几步实现的？（用 1, 2, 3 列表简洁描述输入到输出的过程）
+
+## 🔍 关键细节与启示 (Details & Takeaway)
+
+**技术细节补充：** 补充 1-2 个最关键的技术实现细节（比如某个特殊的 Loss Function 或数据处理技巧）。
+
+**一句话总结：** 如果我明天要在组会上介绍这篇文章，请给我一句最精辟的总结语。
+
+---
+
+论文标题：{self.title}
+
+论文完整内容：
+{cleaned_tex}
+"""
+            # 截断到 100k tokens 以适应 128k 上下文窗口（留空间给 system prompt 和输出）
+            prompt_tokens = enc.encode(user_prompt)
+            if len(prompt_tokens) > 100000:
+                prompt_tokens = prompt_tokens[:100000]
+                user_prompt = enc.decode(prompt_tokens)
+            
+            logger.debug(f"Generating full-paper interpretation for {self.arxiv_id} ({len(prompt_tokens)} tokens)")
+        else:
+            # 降级模式：仅翻译摘要（用于本地模型或无 TeX 的情况）
+            system_prompt = "你是一位专业的学术论文翻译助手，擅长将英文论文摘要准确、完整地翻译成目标语言。请保持学术风格，不要省略任何重要信息。"
+            user_prompt = f"""请将以下论文的摘要翻译成{llm.lang}，保持完整性，不要过度简化或省略内容：
+
+论文标题：{self.title}
 
 原文摘要：
-__ABSTRACT__
+{self.summary}
 """
-        prompt = prompt.replace('__LANG__', llm.lang)
-        prompt = prompt.replace('__TITLE__', self.title)
-        prompt = prompt.replace('__ABSTRACT__', self.summary)
+            prompt_tokens = enc.encode(user_prompt)
+            prompt_tokens = prompt_tokens[:4000]
+            user_prompt = enc.decode(prompt_tokens)
+            
+            logger.debug(f"Generating abstract translation for {self.arxiv_id} (fallback mode, {len(prompt_tokens)} tokens)")
 
-        # use gpt-4o tokenizer for estimation
-        enc = tiktoken.encoding_for_model("gpt-4o")
-        prompt_tokens = enc.encode(prompt)
-        prompt_tokens = prompt_tokens[:4000]  # truncate to 4000 tokens
-        prompt = enc.decode(prompt_tokens)
-        
         tldr = llm.generate(
             messages=[
-                {
-                    "role": "system",
-                    "content": "你是一位专业的学术论文翻译助手，擅长将英文论文摘要准确、完整地翻译成目标语言。请保持学术风格，不要省略任何重要信息。",
-                },
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
             ]
         )
         return tldr
