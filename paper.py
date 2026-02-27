@@ -246,11 +246,13 @@ class ArxivPaper:
 """
             # 截断到 100k tokens 以适应 128k 上下文窗口（留空间给 system prompt 和输出）
             prompt_tokens = enc.encode(user_prompt)
-            if len(prompt_tokens) > 100000:
+            original_token_count = len(prompt_tokens)
+            if original_token_count > 100000:
+                logger.warning(f"[{self.arxiv_id}] 论文内容过长，从 {original_token_count} tokens 截断到 100000 tokens")
                 prompt_tokens = prompt_tokens[:100000]
                 user_prompt = enc.decode(prompt_tokens)
             
-            logger.debug(f"Generating full-paper interpretation for {self.arxiv_id} ({len(prompt_tokens)} tokens)")
+            logger.info(f"[{self.arxiv_id}] 全文解读模式 | TeX原文 {original_token_count} tokens，实际发送 {len(prompt_tokens)} tokens")
         else:
             # 降级模式：仅翻译摘要（用于本地模型或无 TeX 的情况）
             system_prompt = "你是一位专业的学术论文翻译助手，擅长将英文论文摘要准确、完整地翻译成目标语言。请保持学术风格，不要省略任何重要信息。"
@@ -265,7 +267,7 @@ class ArxivPaper:
             prompt_tokens = prompt_tokens[:4000]
             user_prompt = enc.decode(prompt_tokens)
             
-            logger.debug(f"Generating abstract translation for {self.arxiv_id} (fallback mode, {len(prompt_tokens)} tokens)")
+            logger.info(f"[{self.arxiv_id}] 摘要翻译模式（降级）| {len(prompt_tokens)} tokens")
 
         tldr = llm.generate(
             messages=[
