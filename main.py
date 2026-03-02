@@ -315,6 +315,11 @@ if __name__ == '__main__':
     
     if len(daily_papers) == 0 and len(external_papers) == 0:
         logger.info("No papers found.")
+        # 发送飞书通知告知今日没有检索到论文
+        notify_method = args.notify_method.lower() if args.notify_method else 'feishu'
+        if notify_method in ['feishu', 'both'] and args.feishu_webhook_url:
+            logger.info("Sending Feishu notification for no papers found...")
+            send_feishu_message(args.feishu_webhook_url, {}, args.feishu_secret)
         if not args.send_empty:
             exit(0)
     
